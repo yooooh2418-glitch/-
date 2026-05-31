@@ -210,7 +210,9 @@ function resize(){
   W=wrap.clientWidth;H=wrap.clientHeight;
   cv.width=W*DPR;cv.height=H*DPR;ctx.setTransform(DPR,0,0,DPR,0,0);
 }
-window.addEventListener('resize',resize);resize();
+window.addEventListener('resize',resize);
+window.addEventListener('orientationchange',()=>setTimeout(resize,100));
+resize();
 
 // ---------- CHARACTERS ----------
 // each: name, story-ish color set, unlock height. body drawn procedurally.
@@ -534,6 +536,7 @@ function reset(){
 }
 function startGame(){
   initAudio();resumeAudio();startBGM();
+  resize();              // ensure W/H are current (viewport may have changed since last play)
   reset();state='aiming';charging=false;
   startOv.classList.add('hidden');selectOv.classList.add('hidden');overOv.classList.add('hidden');
   hud.classList.remove('hidden');hintEl.classList.remove('hidden');
@@ -541,7 +544,7 @@ function startGame(){
 function heightScore(){return score;}
 
 function gameOver(){
-  state='over';SE.bad();
+  state='over';charging=false;SE.bad();
   buff={type:null,jumps:0};updateBuffUI();
   const h=heightScore();finalScore.textContent=h;
   let nb=false;if(h>best){best=h;nb=true;bestVal.textContent=best;}
@@ -988,10 +991,21 @@ function updateBuffUI(){
 document.getElementById('muteBtn').onclick=e=>{e.stopPropagation();initAudio();toggleMute();};
 
 function frame(){
-  if(state==='aiming'||state==='flying'||state==='over')update();
-  else time+=0.016;
-  updatePowerUI();
-  draw();requestAnimationFrame(frame);
+  // safety: if viewport size changed (iOS address bar, rotation, relayout), re-fit
+  if(wrap.clientWidth&&wrap.clientHeight&&(Math.abs(wrap.clientWidth-W)>1||Math.abs(wrap.clientHeight-H)>1)){
+    resize();
+  }
+  // safety: if in play but the player somehow ended far off-screen while idle, recenter camera
+  if(state==='aiming'&&player&&player.grounded){
+    const want=Math.max(0,-(player.y-H*0.62));
+    if(Math.abs(want-cam)>H){cam=want;} // snap if wildly off
+  }
+  try{
+    if(state==='aiming'||state==='flying')update();
+    else time+=0.016;
+  }catch(err){ /* never let the loop die */ }
+  try{updatePowerUI();draw();}catch(err){}
+  requestAnimationFrame(frame);
 }
 reset();frame();
 })();
