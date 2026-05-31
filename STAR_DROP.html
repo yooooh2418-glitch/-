@@ -93,6 +93,36 @@
   .unlockPop .un{font-family:'Zen Maru Gothic';font-weight:900;font-size:20px;color:#fff;margin-top:2px;}
   .row{display:flex;gap:12px;margin-top:8px;}
 
+  /* name entry */
+  .nameEntry{margin-top:16px;display:flex;flex-direction:column;align-items:center;gap:10px;
+    background:rgba(255,255,255,.05);border:1px solid rgba(196,255,77,.3);border-radius:18px;
+    padding:16px 18px;animation:popin .4s ease;}
+  .nameEntry .neHead{font-family:'Outfit',sans-serif;font-weight:900;font-size:14px;letter-spacing:.16em;
+    color:var(--lime);text-shadow:0 0 14px rgba(196,255,77,.5);}
+  #nameInput{font-family:'Zen Maru Gothic',sans-serif;font-weight:700;font-size:16px;text-align:center;
+    color:var(--ink);background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.18);border-radius:12px;
+    padding:10px 14px;width:200px;outline:none;}
+  #nameInput:focus{border-color:var(--lime);box-shadow:0 0 14px rgba(196,255,77,.35);}
+  .btn.lime{background:var(--lime);box-shadow:0 0 24px rgba(196,255,77,.5);margin-top:0;padding:12px 32px;font-size:15px;}
+
+  /* ranking board */
+  .rankBoard{margin-top:18px;width:min(320px,84vw);background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.1);border-radius:18px;padding:14px 8px;}
+  .rbHead{font-family:'Outfit',sans-serif;font-weight:900;font-size:12px;letter-spacing:.2em;
+    color:var(--amber);text-align:center;margin-bottom:10px;text-transform:uppercase;}
+  #rankList{display:flex;flex-direction:column;gap:5px;max-height:200px;overflow-y:auto;}
+  .rbRow{display:flex;align-items:center;gap:10px;padding:6px 12px;border-radius:10px;
+    font-family:'Zen Maru Gothic',sans-serif;}
+  .rbRow.me{background:linear-gradient(90deg,rgba(196,255,77,.18),transparent);
+    border:1px solid rgba(196,255,77,.35);}
+  .rbRank{font-family:'Outfit',sans-serif;font-weight:900;font-size:14px;color:var(--dim);width:28px;}
+  .rbRow:nth-child(1) .rbRank{color:var(--amber);}
+  .rbRow:nth-child(2) .rbRank{color:#cfd6ff;}
+  .rbRow:nth-child(3) .rbRank{color:#ff9e6b;}
+  .rbName{flex:1;font-weight:700;font-size:14px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .rbScore{font-family:'Outfit',sans-serif;font-weight:900;font-size:15px;color:var(--cyan);}
+  .rbLoad,.rbEmpty{text-align:center;color:var(--dim);font-family:'Zen Maru Gothic';font-size:13px;padding:12px;}
+
   /* character select */
   .charGrid{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;max-width:380px;margin-top:8px;}
   .charCard{width:96px;background:rgba(255,255,255,.04);border:2px solid rgba(255,255,255,.08);
@@ -179,6 +209,20 @@
       <div class="ut">New friend unlocked</div>
       <div class="un" id="unlockName">？？？</div>
     </div>
+
+    <!-- name entry on rank-in -->
+    <div class="nameEntry hidden" id="nameEntry">
+      <div class="neHead" id="neHead">🏆 RANK IN!</div>
+      <input id="nameInput" maxlength="8" placeholder="なまえ (8文字まで)" autocomplete="off">
+      <button class="btn lime" id="saveScoreBtn">とうろく</button>
+    </div>
+
+    <!-- ranking board -->
+    <div class="rankBoard" id="rankBoard">
+      <div class="rbHead">★ RANKING ★</div>
+      <div id="rankList"><div class="rbLoad">よみこみ中…</div></div>
+    </div>
+
     <div class="row">
       <button class="btn" id="retryBtn">もういちど</button>
       <button class="btn cyan" id="toCollectBtn">なかま</button>
@@ -203,6 +247,9 @@ const newbestEl=document.getElementById('newbest');
 const unlockPop=document.getElementById('unlockPop');
 const unlockName=document.getElementById('unlockName');
 const hintEl=document.getElementById('hint');
+const nameEntry=document.getElementById('nameEntry');
+const nameInput=document.getElementById('nameInput');
+const rankListEl=document.getElementById('rankList');
 
 let W=0,H=0,DPR=1;
 function resize(){
@@ -543,6 +590,60 @@ function startGame(){
 }
 function heightScore(){return score;}
 
+// ---------- RANKING (persistent, shared across players) ----------
+const RANK_KEY='stardrop_ranking_v1';
+const RANK_MAX=10;            // keep top 10
+let rankingCache=[];          // [{name,score,t}]
+let pendingScore=0;           // score awaiting name entry
+let lastSavedId=null;         // to highlight my row
+
+async function loadRanking(){
+  try{
+    if(!window.storage){rankingCache=Array.isArray(rankingCache)?rankingCache:[];return rankingCache;}
+    const res=await window.storage.get(RANK_KEY,true); // shared
+    rankingCache=res&&res.value?JSON.parse(res.value):[];
+  }catch(e){ if(!Array.isArray(rankingCache))rankingCache=[]; }  // key may not exist yet
+  if(!Array.isArray(rankingCache))rankingCache=[];
+  return rankingCache;
+}
+async function saveRanking(){
+  try{ if(window.storage)await window.storage.set(RANK_KEY,JSON.stringify(rankingCache),true); }catch(e){}
+}
+function qualifies(s){
+  if(s<=0)return false;
+  if(rankingCache.length<RANK_MAX)return true;
+  return s>rankingCache[rankingCache.length-1].score;
+}
+function renderRanking(){
+  if(!rankingCache.length){rankListEl.innerHTML='<div class="rbEmpty">まだ きろくが ないよ</div>';return;}
+  rankListEl.innerHTML='';
+  rankingCache.slice(0,RANK_MAX).forEach((r,i)=>{
+    const row=document.createElement('div');
+    row.className='rbRow'+(r._id&&r._id===lastSavedId?' me':'');
+    const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':(i+1);
+    row.innerHTML=`<div class="rbRank">${medal}</div>`+
+      `<div class="rbName"></div><div class="rbScore">${r.score}</div>`;
+    row.querySelector('.rbName').textContent=r.name||'???';
+    rankListEl.appendChild(row);
+  });
+}
+async function refreshRankingUI(){
+  rankListEl.innerHTML='<div class="rbLoad">よみこみ中…</div>';
+  await loadRanking();
+  renderRanking();
+}
+async function submitScore(name){
+  const id='id'+Date.now()+Math.random().toString(36).slice(2,6);
+  await loadRanking(); // get freshest before writing (last-write-wins mitigation)
+  rankingCache.push({name:(name||'なまなし').slice(0,8),score:pendingScore,t:Date.now(),_id:id});
+  rankingCache.sort((a,b)=>b.score-a.score);
+  rankingCache=rankingCache.slice(0,RANK_MAX);
+  lastSavedId=id;
+  await saveRanking();
+  renderRanking();
+  SE.good();
+}
+
 function gameOver(){
   state='over';charging=false;SE.bad();
   buff={type:null,jumps:0};updateBuffUI();
@@ -557,6 +658,17 @@ function gameOver(){
   if(newlyUnlocked){unlockName.textContent=newlyUnlocked.name+'「'+newlyUnlocked.desc+'」';unlockPop.classList.remove('hidden');SE.unlock();}
   else unlockPop.classList.add('hidden');
   overOv.classList.remove('hidden');hud.classList.add('hidden');hintEl.classList.add('hidden');
+
+  // ranking: load, decide rank-in, show board
+  pendingScore=h;
+  nameEntry.classList.add('hidden');
+  (async()=>{
+    await refreshRankingUI();
+    if(qualifies(h)){
+      nameEntry.classList.remove('hidden');
+      nameInput.value='';
+    }
+  })();
 }
 
 // ---------- INPUT: hold & slide to aim (finger controls angle + power), release to fire ----------
@@ -624,6 +736,17 @@ document.getElementById('retryBtn').onclick=e=>{e.stopPropagation();startGame();
 document.getElementById('collectBtn').onclick=e=>{e.stopPropagation();openSelect('start');};
 document.getElementById('toCollectBtn').onclick=e=>{e.stopPropagation();openSelect('over');};
 document.getElementById('backBtn').onclick=e=>{e.stopPropagation();closeSelect();};
+document.getElementById('saveScoreBtn').onclick=async e=>{
+  e.stopPropagation();
+  const nm=nameInput.value.trim()||'なまなし';
+  nameEntry.classList.add('hidden');
+  await submitScore(nm);
+};
+nameInput.addEventListener('keydown',e=>{
+  e.stopPropagation();
+  if(e.key==='Enter'){document.getElementById('saveScoreBtn').click();}
+});
+nameInput.addEventListener('pointerdown',e=>e.stopPropagation());
 
 let selectFrom='start';
 function openSelect(from){selectFrom=from;state='select';
@@ -865,12 +988,15 @@ function draw(){
     const col=it.kind==='up'?'#c4ff4d':'#ff7a7a';
     ctx.shadowColor=col;ctx.shadowBlur=18;ctx.fillStyle=col;
     ctx.beginPath();ctx.arc(it.x,fy,it.r,0,7);ctx.fill();ctx.shadowBlur=0;
-    // arrow up/down
+    // arrow: up-item -> arrow points UP, down-item -> arrow points DOWN
     ctx.strokeStyle='#0b1020';ctx.lineWidth=3;ctx.lineCap='round';ctx.lineJoin='round';
-    const d=it.kind==='up'?-1:1;
+    const up=(it.kind==='up');
+    const tipY = up ? fy-7 : fy+7;   // arrow tip
+    const tailY= up ? fy+7 : fy-7;   // arrow tail
     ctx.beginPath();
-    ctx.moveTo(it.x,fy-6*d);ctx.lineTo(it.x,fy+6*d);
-    ctx.moveTo(it.x-5,fy-1*d);ctx.lineTo(it.x,fy-6*d);ctx.lineTo(it.x+5,fy-1*d);
+    ctx.moveTo(it.x,tailY);ctx.lineTo(it.x,tipY);                 // shaft
+    ctx.moveTo(it.x-5, tipY+(up?6:-6));ctx.lineTo(it.x,tipY);     // left barb
+    ctx.lineTo(it.x+5, tipY+(up?6:-6));                          // right barb
     ctx.stroke();
   }
 
